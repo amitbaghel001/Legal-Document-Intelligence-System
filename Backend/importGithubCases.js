@@ -221,7 +221,8 @@ async function main() {
     // Connect to MongoDB
     console.log('\n📡 Connecting to MongoDB...');
     // await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/legal-docs');
-    
+    await mongoose.connect('REDACTED_MONGO_CONNECTION_STRING');
+
     await mongoose.connect(process.env.MONGO_URI);
     console.log('✅ Connected to MongoDB\n');
     

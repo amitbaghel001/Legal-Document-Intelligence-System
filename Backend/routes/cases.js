@@ -27,21 +27,22 @@ router.post('/create', protect, async (req, res) => {
   }
 });
 
-// Get all cases
+// Get all cases - FIXED VERSION
 router.get('/all', protect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 100;  // Changed from 10 to 100
     const skip = (page - 1) * limit;
 
+    // Don't populate, just get cases directly
     const cases = await Case.find()
-      .populate('createdBy', 'name email')
-      .populate('documents')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
     const total = await Case.countDocuments();
+
+    console.log(`✅ Fetched ${cases.length} cases out of ${total} total`);
 
     res.json({
       cases,
@@ -50,6 +51,7 @@ router.get('/all', protect, async (req, res) => {
       totalCases: total
     });
   } catch (error) {
+    console.error('❌ Error fetching cases:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import Case from './models/Case.js';
-import Document from './models/Document.js';
+import Document from './models/document.js';
 import fs from 'fs';
 import dotenv from 'dotenv';
 

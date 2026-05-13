@@ -112,7 +112,10 @@ async function import100RealCases() {
   try {
     console.log('🔗 Connecting to MongoDB...');
  
-    await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/legal-docs');
+    // await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/legal-docs');
+     
+     await mongoose.connect('REDACTED_MONGO_CONNECTION_STRING');
+
     console.log('✅ Connected\n');
 
     await Case.deleteMany({});
