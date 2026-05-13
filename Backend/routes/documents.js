@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import axios from 'axios';
-import Document from '../models/Document.js';
+import Document from '../models/document.js';
 import Case from '../models/Case.js';
 import { protect } from '../middleware/auth.js';
 
