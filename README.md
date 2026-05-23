@@ -208,14 +208,6 @@ Frontend runs on:
 ```text
 http://localhost:5173
 ```
-# 📸 Screenshots
-
-> Add project screenshots here:
-- Login Interface
-- Analytics Dashboard
-- Document Analysis Page
-- Case Managem
----
 
 # 🌍 Why This Project Matters
 
