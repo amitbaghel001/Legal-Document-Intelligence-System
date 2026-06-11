@@ -1,4 +1,5 @@
 import express from 'express';
+import axios from 'axios';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -80,18 +81,10 @@ router.post('/gemini-analyze', protect, async (req, res) => {
       }
     };
 
-    const geminiResponse = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    const { data: result } = await axios.post(url, payload, {
+      headers: { 'Content-Type': 'application/json' }
     });
 
-    if (!geminiResponse.ok) {
-      const errBody = await geminiResponse.text();
-      return res.status(502).json({ error: `Gemini API error ${geminiResponse.status}: ${errBody}` });
-    }
-
-    const result = await geminiResponse.json();
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
