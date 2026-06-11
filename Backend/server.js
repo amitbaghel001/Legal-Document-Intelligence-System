@@ -24,7 +24,13 @@ connectDB();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://casemadad.netlify.app'],
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://casemadad.netlify.app',
+    'https://legal-doc-intelligence.vercel.app',
+    'https://legal-doc-intelligence-cci168wrm-amits-projects-0e308fc8.vercel.app'
+  ],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
