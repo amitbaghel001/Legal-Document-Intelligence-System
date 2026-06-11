@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Container, Typography, Button, Box, Paper, Chip, Divider, Grid,
@@ -9,12 +9,17 @@ import {
 import { CloudUpload, Description, Delete, Lightbulb } from '@mui/icons-material';
 import API from '../api/axios';
 import Loading from '../components/Loading';
+import { AuthContext } from '../context/AuthContext';
 
 const CaseDetails = () => {
   const { id } = useParams();
+  const { user } = useContext(AuthContext);
+  const canEdit = user && ['judge', 'lawyer', 'clerk'].includes(user.role);
+  const canDelete = user && ['judge', 'clerk'].includes(user.role);
   const [case_, setCase] = useState(null);
   const [loading, setLoading] = useState(true);
   const [similarCases, setSimilarCases] = useState([]);
+  const [loadingSimilarCases, setLoadingSimilarCases] = useState(true);
   const [selectedIPC, setSelectedIPC] = useState(null);
   const [ipcContextDialog, setIpcContextDialog] = useState(false);
   const [analyzingCase, setAnalyzingCase] = useState(false);
@@ -38,11 +43,16 @@ const CaseDetails = () => {
 
   // Fetch similar cases for precedent analysis
   const fetchSimilarCases = async () => {
+    setLoadingSimilarCases(true);
     try {
       const { data } = await API.get(`/cases/${id}/similar`);
-      setSimilarCases(data);
+      console.log('Similar cases received:', data);
+      setSimilarCases(data || []);
     } catch (error) {
       console.error('Error fetching similar cases:', error);
+      setSimilarCases([]);
+    } finally {
+      setLoadingSimilarCases(false);
     }
   };
 
@@ -122,7 +132,7 @@ const CaseDetails = () => {
               sentence: sentence,
               confidence: Math.min(confidence, 0.98),
               paragraph: Math.floor(idx / 3) + 1,
-              matchedKeywords: matchedKeywords.slice(0, 3) // Top 3 matched keywords
+              matchedKeywords: matchedKeywords.slice(0, 3)
             });
           }
         }
@@ -143,7 +153,7 @@ const CaseDetails = () => {
       
       setSelectedIPC({
         ipcCode,
-        contexts: contexts.slice(0, 3) // Show top 3 matches
+        contexts: contexts.slice(0, 3)
       });
       setIpcContextDialog(true);
       
@@ -172,23 +182,37 @@ const CaseDetails = () => {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Case Details</Typography>
+        <Box>
+          <Typography variant="h4">Case Details</Typography>
+          {user && (
+            <Chip
+              label={user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+              size="small"
+              color={user.role === 'judge' ? 'primary' : user.role === 'lawyer' ? 'secondary' : 'default'}
+              sx={{ mt: 0.5 }}
+            />
+          )}
+        </Box>
         <Box display="flex" gap={2}>
-          <Button
-            variant="outlined"
-            startIcon={analyzingCase ? <CircularProgress size={20} /> : <Lightbulb />}
-            onClick={handleAIAnalysis}
-            disabled={analyzingCase}
-          >
-            {analyzingCase ? 'Analyzing...' : 'AI Analysis'}
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<CloudUpload />}
-            onClick={() => navigate(`/upload/${case_._id}`)}
-          >
-            Upload Document
-          </Button>
+          {canEdit && (
+            <Button
+              variant="outlined"
+              startIcon={analyzingCase ? <CircularProgress size={20} /> : <Lightbulb />}
+              onClick={handleAIAnalysis}
+              disabled={analyzingCase}
+            >
+              {analyzingCase ? 'Analyzing...' : 'AI Analysis'}
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              variant="contained"
+              startIcon={<CloudUpload />}
+              onClick={() => navigate(`/upload/${case_._id}`)}
+            >
+              Upload Document
+            </Button>
+          )}
         </Box>
       </Box>
 
@@ -303,55 +327,104 @@ const CaseDetails = () => {
             </Paper>
           )}
 
-          {/* Similar Cases */}
-          {similarCases.length > 0 && (
-            <Paper sx={{ p: 3, mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Similar Cases (Precedent Analysis)
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              <Alert severity="info" sx={{ mb: 2 }}>
-                AI found {similarCases.length} similar cases based on IPC sections and entities
-              </Alert>
-              <List>
-                {similarCases.map((sCase) => (
-                  <ListItem 
-                    key={sCase._id} 
-                    button 
-                    component={Link} 
-                    to={`/case/${sCase._id}`}
-                    sx={{ 
-                      border: '1px solid #e0e0e0', 
-                      borderRadius: 1, 
-                      mb: 1,
-                      '&:hover': { backgroundColor: 'action.hover' }
-                    }}
-                  >
-                    <ListItemText
-                      primary={
-                        <Box display="flex" justifyContent="space-between" alignItems="center">
-                          <Typography variant="body1">{sCase.caseNumber}</Typography>
+          {/* Similar Cases - IMPROVED VERSION */}
+          <Paper sx={{ p: 3, mb: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Similar Cases (Precedent Analysis)
+            </Typography>
+            <Divider sx={{ mb: 2 }} />
+            
+            {loadingSimilarCases ? (
+              <Box display="flex" justifyContent="center" alignItems="center" py={4}>
+                <CircularProgress />
+                <Typography sx={{ ml: 2 }}>Finding similar cases...</Typography>
+              </Box>
+            ) : similarCases && similarCases.length > 0 ? (
+              <>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  AI found {similarCases.length} similar cases based on IPC sections, entities, and case content
+                </Alert>
+                <List>
+                  {similarCases.map((sCase) => (
+                    <ListItem 
+                      key={sCase._id} 
+                      button 
+                      component={Link} 
+                      to={`/case/${sCase._id}`}
+                      sx={{ 
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        borderRadius: 2, 
+                        mb: 2,
+                        display: 'block',
+                        textDecoration: 'none',
+                        '&:hover': { 
+                          backgroundColor: 'action.hover',
+                          transform: 'translateX(4px)',
+                          transition: 'all 0.2s'
+                        }
+                      }}
+                    >
+                      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
+                        <Typography variant="subtitle1" fontWeight="bold" color="primary">
+                          {sCase.caseNumber}
+                        </Typography>
+                        <Chip 
+                          label={`${sCase.similarityScore}% Match`} 
+                          size="small" 
+                          color={
+                            sCase.similarityScore >= 50 ? 'success' :
+                            sCase.similarityScore >= 30 ? 'warning' : 'default'
+                          }
+                          sx={{ fontWeight: 'bold' }}
+                        />
+                      </Box>
+                      
+                      <Typography variant="body2" color="text.primary" sx={{ mb: 1 }}>
+                        {sCase.title}
+                      </Typography>
+                      
+                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
+                        {sCase.ipcTags && sCase.ipcTags.slice(0, 4).map((tag, idx) => (
                           <Chip 
-                            label={`${sCase.similarityScore}% Match`} 
+                            key={idx}
+                            label={tag} 
                             size="small" 
-                            color="success"
+                            variant="outlined"
+                            color="primary"
+                          />
+                        ))}
+                        {sCase.ipcTags && sCase.ipcTags.length > 4 && (
+                          <Chip 
+                            label={`+${sCase.ipcTags.length - 4} more`}
+                            size="small"
+                            variant="outlined"
+                          />
+                        )}
+                      </Box>
+                      
+                      {sCase.status && (
+                        <Box sx={{ mt: 1 }}>
+                          <Chip 
+                            label={sCase.status} 
+                            size="small"
+                            color={sCase.status === 'completed' ? 'success' : 'default'}
                           />
                         </Box>
-                      }
-                      secondary={
-                        <>
-                          <Typography variant="body2">{sCase.title}</Typography>
-                          <Typography variant="caption" color="textSecondary">
-                            IPC: {sCase.ipcTags.join(', ')}
-                          </Typography>
-                        </>
-                      }
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Paper>
-          )}
+                      )}
+                    </ListItem>
+                  ))}
+                </List>
+              </>
+            ) : (
+              <Alert severity="warning">
+                No similar cases found in the database with minimum 10% similarity.
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  This could mean this is a unique case or there aren't enough cases in the database yet.
+                </Typography>
+              </Alert>
+            )}
+          </Paper>
         </Grid>
 
         {/* Documents Sidebar */}
@@ -377,14 +450,16 @@ const CaseDetails = () => {
                           </>
                         }
                       />
-                      <IconButton 
-                        color="error" 
-                        size="small"
-                        onClick={() => handleDeleteDocument(doc._id, doc.originalName)}
-                        sx={{ ml: 1 }}
-                      >
-                        <Delete fontSize="small" />
-                      </IconButton>
+                      {canDelete && (
+                        <IconButton
+                          color="error"
+                          size="small"
+                          onClick={() => handleDeleteDocument(doc._id, doc.originalName)}
+                          sx={{ ml: 1 }}
+                        >
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      )}
                     </ListItem>
                   ))}
                 </List>
@@ -394,15 +469,17 @@ const CaseDetails = () => {
                 </Typography>
               )}
 
-              <Button
-                fullWidth
-                variant="outlined"
-                startIcon={<CloudUpload />}
-                onClick={() => navigate(`/upload/${case_._id}`)}
-                sx={{ mt: 2 }}
-              >
-                Upload Document
-              </Button>
+              {canEdit && (
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  startIcon={<CloudUpload />}
+                  onClick={() => navigate(`/upload/${case_._id}`)}
+                  sx={{ mt: 2 }}
+                >
+                  Upload Document
+                </Button>
+              )}
             </CardContent>
           </Card>
         </Grid>
