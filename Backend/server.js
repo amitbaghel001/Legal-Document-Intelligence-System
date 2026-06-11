@@ -12,6 +12,7 @@ import documentRoutes from './routes/documents.js';
 import similarCasesRoutes from './routes/similarCases.js';
 import aiAnalysisRoutes from './routes/aiAnalysis.js';
 import schedulingRoutes from './routes/scheduling.js';
+import geminiRoutes from './routes/gemini.js';
 
 // Debug line (you can remove this later)
 console.log("MONGO_URI:", process.env.MONGO_URI);
@@ -39,6 +40,7 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/cases', similarCasesRoutes);
 app.use('/api/scheduling', schedulingRoutes);
 app.use('/api/ai', aiAnalysisRoutes);
+app.use('/api/ai', geminiRoutes);
 
 // Health check (main route)
 app.get('/', (req, res) => {
