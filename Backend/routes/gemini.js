@@ -16,7 +16,11 @@ router.post('/gemini-analyze', protect, async (req, res) => {
       return res.status(500).json({ error: 'Gemini API key not configured on server' });
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${API_KEY}`;
+    // gemini-2.5-flash's free tier caps out at ~20 requests/day per project,
+    // which real users would exhaust almost immediately. flash-lite has its
+    // own separate, much higher daily quota and still supports structured
+    // JSON output via responseSchema.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${API_KEY}`;
 
     const schema = {
       type: 'OBJECT',
@@ -87,7 +91,11 @@ router.post('/gemini-analyze', protect, async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const upstreamMessage = error.response?.data?.error?.message;
+    console.error('Gemini API error:', upstreamMessage || error.message);
+    res.status(error.response?.status || 500).json({
+      error: upstreamMessage || error.message
+    });
   }
 });
 

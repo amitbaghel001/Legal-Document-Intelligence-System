@@ -6,30 +6,34 @@ import { protect } from '../middleware/auth.js';
 const router = express.Router();
 
 // AI-powered case prioritization algorithm
+//
+// Case-type urgency sets a priority TIER (baseline score); age and document
+// count only break ties within a tier. Previously age alone could add up to
+// 50 while an urgent-keyword match only added 40, so a months-old routine
+// case would outrank a same-day murder case. Tier gaps here (20/15/15) are
+// kept larger than the max combined tie-breaker (12), so a case can never
+// climb into the tier above it just by being old or having many documents.
 function calculateCasePriority(case_) {
-  let priorityScore = 0;
-  
-  // Age of case (older = higher priority)
   const daysSinceCreated = (Date.now() - new Date(case_.createdAt)) / (1000 * 60 * 60 * 24);
-  priorityScore += Math.min(daysSinceCreated * 2, 50);
-  
-  // IPC severity scoring
+
   const urgentIPCs = ['IPC 302', 'IPC 376', 'IPC 498A', 'murder', 'rape', 'dowry'];
-  const hasUrgentIPC = case_.ipcTags?.some(tag => 
+  const hasUrgentIPC = case_.ipcTags?.some(tag =>
     urgentIPCs.some(urgent => tag.toLowerCase().includes(urgent.toLowerCase()))
-  ) || case_.title?.toLowerCase().match(/murder|rape|dowry|bail|custody/);
-  
-  if (hasUrgentIPC) priorityScore += 40;
-  
-  // Number of documents (complexity)
-  priorityScore += Math.min((case_.documents?.length || 0) * 5, 20);
-  
-  // Case type urgency
-  if (case_.title?.toLowerCase().includes('bail')) priorityScore += 30;
-  if (case_.title?.toLowerCase().includes('custody')) priorityScore += 25;
-  if (case_.title?.toLowerCase().includes('interim')) priorityScore += 20;
-  
-  return priorityScore;
+  ) || case_.title?.toLowerCase().match(/murder|rape|dowry/);
+
+  const hasBailOrCustody = case_.title?.toLowerCase().match(/bail|custody/);
+  const hasInterim = case_.title?.toLowerCase().includes('interim');
+
+  let tierBaseline;
+  if (hasUrgentIPC) tierBaseline = 70;        // urgent
+  else if (hasBailOrCustody) tierBaseline = 55; // high
+  else if (hasInterim) tierBaseline = 40;       // medium
+  else tierBaseline = 20;                       // low
+
+  const ageBonus = Math.min(daysSinceCreated * 0.3, 8);
+  const docsBonus = Math.min((case_.documents?.length || 0), 4);
+
+  return tierBaseline + ageBonus + docsBonus;
 }
 
 // Generate AI-suggested schedule
@@ -72,23 +76,27 @@ router.get('/auto-schedule', protect, async (req, res) => {
       '04:00 PM', '04:30 PM'
     ];
     
-    let datePointer = new Date(start);
-    datePointer.setHours(0, 0, 0, 0);
+    // Build the date pointer at UTC midnight of the intended calendar day.
+    // Using local setHours(0,0,0,0) here previously meant that in timezones
+    // ahead of UTC (e.g. IST, +5:30), local midnight serialized to the
+    // *previous* day once converted to an ISO string, so schedules always
+    // showed one day earlier than intended. Anchoring to UTC avoids that.
+    let datePointer = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()));
     let caseIndex = 0;
-    
+
     for (let day = 0; day < parseInt(days) && caseIndex < casesWithPriority.length; day++) {
       // Skip weekends
-      while (datePointer.getDay() === 0 || datePointer.getDay() === 6) {
-        datePointer.setDate(datePointer.getDate() + 1);
+      while (datePointer.getUTCDay() === 0 || datePointer.getUTCDay() === 6) {
+        datePointer.setUTCDate(datePointer.getUTCDate() + 1);
       }
-      
+
       courtHours.forEach((time, slotIndex) => {
         if (caseIndex < casesWithPriority.length) {
           const item = casesWithPriority[caseIndex];
-          const priorityLevel = item.priorityScore > 70 ? 'urgent' : 
-                               item.priorityScore > 50 ? 'high' : 
-                               item.priorityScore > 30 ? 'medium' : 'low';
-          
+          const priorityLevel = item.priorityScore >= 70 ? 'urgent' :
+                               item.priorityScore >= 55 ? 'high' :
+                               item.priorityScore >= 40 ? 'medium' : 'low';
+
           schedule.push({
             caseId: item.case._id,
             caseNumber: item.case.caseNumber,
@@ -103,8 +111,8 @@ router.get('/auto-schedule', protect, async (req, res) => {
           caseIndex++;
         }
       });
-      
-      datePointer.setDate(datePointer.getDate() + 1);
+
+      datePointer.setUTCDate(datePointer.getUTCDate() + 1);
     }
     
     res.json({

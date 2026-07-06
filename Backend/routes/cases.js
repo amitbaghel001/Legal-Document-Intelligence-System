@@ -2,6 +2,7 @@ import express from 'express';
 import Case from '../models/Case.js';
 import '../models/Document.js';
 import { protect } from '../middleware/auth.js';
+import { getEmbedding, caseEmbeddingText } from '../utils/embeddings.js';
 
 const router = express.Router();
 
@@ -21,6 +22,13 @@ router.post('/create', protect, async (req, res) => {
       description,
       createdBy: req.user._id
     });
+
+    // Best-effort: don't fail case creation if embedding generation fails
+    const embedding = await getEmbedding(caseEmbeddingText(newCase));
+    if (embedding) {
+      newCase.embedding = embedding;
+      await newCase.save();
+    }
 
     res.status(201).json(newCase);
   } catch (error) {
@@ -87,6 +95,15 @@ router.put('/:id', protect, async (req, res) => {
 
     if (!case_) {
       return res.status(404).json({ error: 'Case not found' });
+    }
+
+    // Re-embed when the text that describes the case has changed
+    if (title !== undefined || description !== undefined || summary !== undefined) {
+      const embedding = await getEmbedding(caseEmbeddingText(case_));
+      if (embedding) {
+        case_.embedding = embedding;
+        await case_.save();
+      }
     }
 
     res.json(case_);

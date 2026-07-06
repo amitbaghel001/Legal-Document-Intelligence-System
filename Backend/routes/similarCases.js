@@ -2,6 +2,7 @@ import express from 'express';
 import Case from '../models/Case.js';
 import '../models/Document.js';
 import { protect } from '../middleware/auth.js';
+import { cosineSimilarityVec } from '../utils/embeddings.js';
 
 const router = express.Router();
 
@@ -67,41 +68,51 @@ function tokenize(text) {
 // Calculate multi-factor similarity
 function calculateSimilarity(currentCase, compareCase) {
   try {
-    // 1. IPC Tags Similarity (30% weight - reduced due to generic tags)
+    // 1. IPC Tags Similarity
     const ipcSim = jaccardSimilarity(
       currentCase.ipcTags || [],
       compareCase.ipcTags || []
     );
-    
-    // 2. Entities Similarity (30% weight - increased)
+
+    // 2. Entities Similarity
     const entitySim = jaccardSimilarity(
       currentCase.entities || [],
       compareCase.entities || []
     );
-    
-    // 3. Description Text Similarity (30% weight - increased)
-    const currentDescTokens = tokenize((currentCase.description || '').substring(0, 2000));
-    const compareDescTokens = tokenize((compareCase.description || '').substring(0, 2000));
-    const descSim = cosineSimilarity(currentDescTokens, compareDescTokens);
-    
-    // 4. Title Similarity (10% weight)
+
+    // 3. Title Similarity
     const currentTitleTokens = tokenize(currentCase.title || '');
     const compareTitleTokens = tokenize(compareCase.title || '');
     const titleSim = cosineSimilarity(currentTitleTokens, compareTitleTokens);
-    
-    // Weighted combination (adjusted weights)
+
+    // 4. Meaning similarity: prefer Gemini semantic embeddings (captures meaning,
+    // not just shared words). Fall back to word-overlap cosine on description
+    // for older cases that don't have an embedding yet.
+    const semanticSim = cosineSimilarityVec(currentCase.embedding, compareCase.embedding);
+    const usingSemantic = semanticSim !== null;
+
+    const meaningSim = usingSemantic
+      ? Math.max(semanticSim, 0)
+      : cosineSimilarity(
+          tokenize((currentCase.description || '').substring(0, 2000)),
+          tokenize((compareCase.description || '').substring(0, 2000))
+        );
+
+    // Weighted combination. Meaning (semantic or word-overlap) carries the most
+    // weight since it best captures whether two cases are actually about the
+    // same kind of dispute, not just sharing generic IPC tags.
     const rawScore = (
-      (ipcSim * 0.30) +      // IPC tags
-      (entitySim * 0.30) +   // Entities (parties)
-      (descSim * 0.30) +     // Description
-      (titleSim * 0.10)      // Title
+      (meaningSim * 0.45) +
+      (ipcSim * 0.20) +
+      (entitySim * 0.20) +
+      (titleSim * 0.15)
     );
-    
+
     // Convert to percentage
     const finalScore = Math.round(rawScore * 1000) / 10;
-    
+
     return finalScore;
-    
+
   } catch (error) {
     console.error('Similarity calculation error:', error);
     return 0;
@@ -124,7 +135,7 @@ router.get('/:caseId/similar', protect, async (req, res) => {
     // Get all other cases
     const allCases = await Case.find({
       _id: { $ne: currentCase._id }
-    }).select('caseNumber title description summary ipcTags entities status createdAt');
+    }).select('caseNumber title description summary ipcTags entities status createdAt embedding');
 
     console.log(`Comparing against ${allCases.length} cases`);
 

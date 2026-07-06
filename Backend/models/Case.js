@@ -13,7 +13,7 @@ const caseSchema = new mongoose.Schema({
   description: String,
   status: {
     type: String,
-    enum: ['pending', 'processing', 'completed', 'closed'],
+    enum: ['pending', 'processing', 'completed', 'closed', 'scheduled'],
     default: 'pending'
   },
   createdBy: {
@@ -28,6 +28,24 @@ const caseSchema = new mongoose.Schema({
   summary: String,
   ipcTags: [String],
   entities: [String],
+  embedding: [Number],
+  priority: {
+    type: String,
+    enum: ['low', 'medium', 'high', 'urgent']
+  },
+  scheduledDate: Date,
+  scheduledTime: String,
+  courtRoom: String,
+  estimatedDuration: Number,
+  assignedJudge: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  previousHearings: [{
+    date: Date,
+    notes: String,
+    duration: Number
+  }],
   createdAt: {
     type: Date,
     default: Date.now
