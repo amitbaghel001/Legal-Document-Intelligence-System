@@ -1,8 +1,8 @@
 import express from 'express';
-import axios from 'axios';
 import Case from '../models/Case.js';
 import Document from '../models/Document.js';
 import { protect } from '../middleware/auth.js';
+import { postGeminiWithRetry } from '../utils/geminiRetry.js';
 
 const router = express.Router();
 
@@ -72,7 +72,7 @@ router.post('/analyze/:caseId', protect, async (req, res) => {
       }
     };
 
-    const { data } = await axios.post(url, payload, {
+    const { data } = await postGeminiWithRetry(url, payload, {
       headers: { 'Content-Type': 'application/json' },
       timeout: 30000
     });

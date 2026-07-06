@@ -1,6 +1,6 @@
 import express from 'express';
-import axios from 'axios';
 import { protect } from '../middleware/auth.js';
+import { postGeminiWithRetry } from '../utils/geminiRetry.js';
 
 const router = express.Router();
 
@@ -85,7 +85,7 @@ router.post('/gemini-analyze', protect, async (req, res) => {
       }
     };
 
-    const { data: result } = await axios.post(url, payload, {
+    const { data: result } = await postGeminiWithRetry(url, payload, {
       headers: { 'Content-Type': 'application/json' }
     });
 
