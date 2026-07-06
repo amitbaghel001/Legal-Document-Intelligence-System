@@ -17,13 +17,6 @@ import geminiRoutes from './routes/gemini.js';
 // Debug line (you can remove this later)
 console.log("MONGO_URI:", process.env.MONGO_URI);
 
-// TEMP diagnostic: masked fingerprint only, never the real secret, to verify
-// which GEMINI_API_KEY value this deployment is actually running with.
-{
-  const gk = process.env.GEMINI_API_KEY || '';
-  console.log(`GEMINI_API_KEY fingerprint: length=${gk.length} starts="${gk.substring(0, 10)}" ends="${gk.substring(gk.length - 6)}"`);
-}
-
 const app = express();
 
 // Connect to MongoDB
