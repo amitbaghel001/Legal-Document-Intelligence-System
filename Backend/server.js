@@ -28,9 +28,7 @@ app.use(cors({
     'http://localhost:3000',
     'http://localhost:5173',
     'https://justicelenz.netlify.app',
-    'https://casemadad.netlify.app',
-    'https://legal-doc-intelligence.vercel.app',
-    'https://legal-doc-intelligence-cci168wrm-amits-projects-0e308fc8.vercel.app'
+    'https://casemadad.netlify.app'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
