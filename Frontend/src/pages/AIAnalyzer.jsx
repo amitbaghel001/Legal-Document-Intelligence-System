@@ -5,7 +5,11 @@ import {
   MenuItem, Select, FormControl, InputLabel, Snackbar
 } from '@mui/material';
 import { CloudUpload, Psychology, Clear, Description, Save } from '@mui/icons-material';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import API from '../api/axios';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 function AIAnalyzer() {
   const [documentText, setDocumentText] = useState('');
@@ -64,7 +68,7 @@ function AIAnalyzer() {
       reader.onload = async (e) => {
         try {
           const typedArray = new Uint8Array(e.target.result);
-          const pdf = await window.pdfjsLib.getDocument({ data: typedArray }).promise;
+          const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise;
           let fullText = '';
           for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
