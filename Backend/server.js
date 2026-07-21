@@ -14,9 +14,6 @@ import aiAnalysisRoutes from './routes/aiAnalysis.js';
 import schedulingRoutes from './routes/scheduling.js';
 import geminiRoutes from './routes/gemini.js';
 
-// Debug line (you can remove this later)
-console.log("MONGO_URI:", process.env.MONGO_URI);
-
 const app = express();
 
 // Connect to MongoDB
