@@ -7,6 +7,11 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const persistSession = (data) => {
+    localStorage.setItem('token', data.token);
+    if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
+  };
+
   useEffect(() => {
     const checkAuth = async () => {
       const token = localStorage.getItem('token');
@@ -16,6 +21,7 @@ export const AuthProvider = ({ children }) => {
           setUser(data);
         } catch (error) {
           localStorage.removeItem('token');
+          localStorage.removeItem('refreshToken');
         }
       }
       setLoading(false);
@@ -26,25 +32,33 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const { data } = await API.post('/auth/login', { email, password });
-    localStorage.setItem('token', data.token);
+    persistSession(data);
     setUser(data);
     return data;
   };
 
   const register = async (name, email, password, role) => {
     const { data } = await API.post('/auth/register', { name, email, password, role });
-    localStorage.setItem('token', data.token);
+    persistSession(data);
     setUser(data);
     return data;
   };
 
+  const logoutAll = async () => {
+    await API.post('/auth/logout-all');
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    setUser(null);
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, logoutAll }}>
       {children}
     </AuthContext.Provider>
   );

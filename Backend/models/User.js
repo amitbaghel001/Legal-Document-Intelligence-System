@@ -23,6 +23,10 @@ const userSchema = new mongoose.Schema({
     enum: ['judge', 'lawyer', 'clerk', 'citizen'],
     default: 'citizen'
   },
+  tokenVersion: {
+    type: Number,
+    default: 0
+  },
   createdAt: {
     type: Date,
     default: Date.now

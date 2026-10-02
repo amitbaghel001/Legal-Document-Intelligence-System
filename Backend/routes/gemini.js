@@ -1,10 +1,12 @@
 import express from 'express';
 import { protect } from '../middleware/auth.js';
+import { authorize } from '../middleware/roles.js';
 import { postGeminiWithRetry } from '../utils/geminiRetry.js';
+import { auditTrail } from '../middleware/auditTrail.js';
 
 const router = express.Router();
 
-router.post('/gemini-analyze', protect, async (req, res) => {
+router.post('/gemini-analyze', protect, authorize('judge', 'lawyer', 'clerk', 'citizen'), auditTrail('AI_ANALYZE_TEXT', 'DOCUMENT'), async (req, res) => {
   try {
     const { text } = req.body;
     if (!text || !text.trim()) {
@@ -89,7 +91,10 @@ router.post('/gemini-analyze', protect, async (req, res) => {
       headers: { 'Content-Type': 'application/json' }
     });
 
-    res.json(result);
+    res.json({
+      ...result,
+      disclaimer: 'AI output is assistive only and must be reviewed by a legal professional before use.'
+    });
   } catch (error) {
     const upstreamMessage = error.response?.data?.error?.message;
     console.error('Gemini API error:', upstreamMessage || error.message);

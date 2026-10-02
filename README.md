@@ -174,8 +174,23 @@ Create a `.env` file inside the Backend directory:
 ```env
 MONGODB_URI=your_mongodb_connection_string
 JWT_SECRET=your_jwt_secret
+ENCRYPTION_KEY=32_char_or_longer_secret
+ACCESS_TOKEN_TTL=15m
+REFRESH_TOKEN_TTL=30d
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX=300
+ML_SERVICE_URL=your_ml_service_url
+GEMINI_API_KEY=your_gemini_api_key
 PORT=5000
 ```
+
+Security hardening added:
+- short-lived access token + refresh token rotation
+- logout-all session invalidation
+- rate limiting
+- role-based endpoint authorization
+- basic upload malware signature checks
+- field-level encryption for sensitive case/document text
 
 ---
 

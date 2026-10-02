@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { encryptText, decryptText } from '../utils/cryptoFields.js';
 
 const documentSchema = new mongoose.Schema({
   filename: {
@@ -27,20 +28,48 @@ const documentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['uploaded', 'processing', 'completed', 'failed'],
+    enum: ['uploaded', 'queued', 'processing', 'completed', 'failed'],
     default: 'uploaded'
   },
+  processingAttempts: {
+    type: Number,
+    default: 0
+  },
+  processingTimeline: [{
+    state: String,
+    message: String,
+    at: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  version: {
+    type: Number,
+    default: 1
+  },
   processedData: {
-    extractedText: String,
-    summary: String,
+    extractedText: {
+      type: String,
+      set: encryptText,
+      get: decryptText
+    },
+    summary: {
+      type: String,
+      set: encryptText,
+      get: decryptText
+    },
     ipcTags: [String],
     entities: [String],
-    confidenceScore: Number
+    confidenceScore: Number,
+    explainabilityNotes: [String]
   },
   uploadedAt: {
     type: Date,
     default: Date.now
   }
 });
+
+documentSchema.set('toJSON', { getters: true });
+documentSchema.set('toObject', { getters: true });
 
 export default mongoose.model('Document', documentSchema);

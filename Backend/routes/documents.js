@@ -6,10 +6,84 @@ import axios from 'axios';
 import Document from '../models/Document.js';
 import Case from '../models/Case.js';
 import { protect } from '../middleware/auth.js';
+import { authorize } from '../middleware/roles.js';
+import { scanUploadedFile } from '../middleware/fileSecurity.js';
+import { auditTrail } from '../middleware/auditTrail.js';
 
 const router = express.Router();
+const MAX_PROCESS_ATTEMPTS = 3;
 
-// Configure multer for file uploads
+function addTimelineEvent(document, state, message) {
+  if (!document.processingTimeline) document.processingTimeline = [];
+  document.processingTimeline.push({ state, message, at: new Date() });
+}
+
+async function processDocumentInBackground(documentId, attempt = 1) {
+  const document = await Document.findById(documentId);
+  if (!document) return;
+
+  try {
+    document.status = 'processing';
+    document.processingAttempts = attempt;
+    addTimelineEvent(document, 'processing', `Processing attempt ${attempt}`);
+    await document.save();
+
+    const mlResponse = await axios.post(
+      process.env.ML_SERVICE_URL,
+      {
+        document_id: document._id,
+        file_path: document.filepath,
+        case_id: document.caseId
+      },
+      { timeout: 60000 }
+    );
+
+    document.processedData = {
+      extractedText: mlResponse.data.extracted_text,
+      summary: mlResponse.data.summary,
+      ipcTags: mlResponse.data.ipc_tags,
+      entities: mlResponse.data.entities,
+      confidenceScore: mlResponse.data.confidence_score,
+      explainabilityNotes: [
+        'Generated from ML service extracted text and legal entity matching.',
+        'Human validation recommended for filing-critical decisions.'
+      ]
+    };
+    document.status = 'completed';
+    addTimelineEvent(document, 'completed', 'Document processing completed');
+    await document.save();
+
+    const case_ = await Case.findById(document.caseId);
+    if (case_) {
+      case_.summary = mlResponse.data.summary;
+      case_.ipcTags = mlResponse.data.ipc_tags;
+      case_.entities = mlResponse.data.entities;
+      case_.status = 'completed';
+      case_.updatedAt = Date.now();
+      if (!case_.timelineEvents) case_.timelineEvents = [];
+      case_.timelineEvents.push({
+        eventType: 'DOCUMENT_PROCESSED',
+        notes: `Document ${document.originalName} processed`,
+        createdAt: new Date()
+      });
+      await case_.save();
+    }
+  } catch (error) {
+    document.status = 'failed';
+    addTimelineEvent(document, 'failed', `Processing failed: ${error.message}`);
+    await document.save();
+
+    if (attempt < MAX_PROCESS_ATTEMPTS) {
+      const delay = 2000 * attempt;
+      setTimeout(() => {
+        processDocumentInBackground(documentId, attempt + 1).catch((err) => {
+          console.error('Retry processing error:', err.message);
+        });
+      }, delay);
+    }
+  }
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
@@ -21,12 +95,11 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /pdf|jpeg|jpg|png/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = allowedTypes.test(file.mimetype);
-
     if (extname && mimetype) {
       cb(null, true);
     } else {
@@ -35,99 +108,116 @@ const upload = multer({
   }
 });
 
-// Upload document
-router.post('/upload', protect, upload.single('document'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-
-    const { caseId } = req.body;
-
-    // Verify case exists
-    const case_ = await Case.findById(caseId);
-    if (!case_) {
-      return res.status(404).json({ error: 'Case not found' });
-    }
-
-    // Create document record
-    const document = await Document.create({
-      filename: req.file.filename,
-      originalName: req.file.originalname,
-      filepath: req.file.path,
-      filesize: req.file.size,
-      mimetype: req.file.mimetype,
-      caseId,
-      uploadedBy: req.user._id,
-      status: 'uploaded'
-    });
-
-    // Add document to case
-    case_.documents.push(document._id);
-    await case_.save();
-
-    res.status(201).json(document);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Process document with ML service
-router.post('/process/:id', protect, async (req, res) => {
-  try {
-    const document = await Document.findById(req.params.id);
-
-    if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    // Update status to processing
-    document.status = 'processing';
-    await document.save();
-
-    // Call ML service (your friend's API)
+router.post(
+  '/upload',
+  protect,
+  authorize('judge', 'lawyer', 'clerk'),
+  upload.single('document'),
+  auditTrail('UPLOAD_DOCUMENT', 'DOCUMENT', (req, res) => res.locals.documentId),
+  async (req, res) => {
     try {
-      const mlResponse = await axios.post(process.env.ML_SERVICE_URL, {
-        document_id: document._id,
-        file_path: document.filepath,
-        case_id: document.caseId
-      }, {
-        timeout: 60000 // 60 second timeout
-      });
-
-      // Update document with processed data
-      document.processedData = {
-        extractedText: mlResponse.data.extracted_text,
-        summary: mlResponse.data.summary,
-        ipcTags: mlResponse.data.ipc_tags,
-        entities: mlResponse.data.entities,
-        confidenceScore: mlResponse.data.confidence_score
-      };
-      document.status = 'completed';
-      await document.save();
-
-      // Update case with processed data
-      const case_ = await Case.findById(document.caseId);
-      if (case_) {
-        case_.summary = mlResponse.data.summary;
-        case_.ipcTags = mlResponse.data.ipc_tags;
-        case_.entities = mlResponse.data.entities;
-        case_.status = 'completed';
-        await case_.save();
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
       }
 
-      res.json(document);
-    } catch (mlError) {
-      document.status = 'failed';
-      await document.save();
-      throw new Error('ML processing failed: ' + mlError.message);
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+      const scanResult = scanUploadedFile(req.file.path);
+      if (!scanResult.safe) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: scanResult.reason });
+      }
 
-// Get document by ID
+      const { caseId } = req.body;
+      const case_ = await Case.findById(caseId);
+      if (!case_) {
+        return res.status(404).json({ error: 'Case not found' });
+      }
+
+      const document = await Document.create({
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        filepath: req.file.path,
+        filesize: req.file.size,
+        mimetype: req.file.mimetype,
+        caseId,
+        uploadedBy: req.user._id,
+        status: 'uploaded',
+        processingTimeline: [{ state: 'uploaded', message: 'Document uploaded', at: new Date() }]
+      });
+      res.locals.documentId = document._id;
+
+      case_.documents.push(document._id);
+      case_.timelineEvents.push({
+        eventType: 'DOCUMENT_UPLOADED',
+        notes: `Document ${document.originalName} uploaded`,
+        createdBy: req.user._id
+      });
+      await case_.save();
+
+      res.status(201).json(document);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+router.post(
+  '/process/:id',
+  protect,
+  authorize('judge', 'lawyer', 'clerk'),
+  auditTrail('PROCESS_DOCUMENT', 'DOCUMENT'),
+  async (req, res) => {
+    try {
+      const document = await Document.findById(req.params.id);
+      if (!document) {
+        return res.status(404).json({ error: 'Document not found' });
+      }
+
+      document.status = 'queued';
+      addTimelineEvent(document, 'queued', 'Document added to processing queue');
+      await document.save();
+
+      processDocumentInBackground(document._id).catch((error) => {
+        console.error('Background processing failure:', error.message);
+      });
+
+      res.status(202).json({
+        success: true,
+        message: 'Document queued for AI processing',
+        documentId: document._id
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+router.post(
+  '/retry/:id',
+  protect,
+  authorize('judge', 'lawyer', 'clerk'),
+  auditTrail('RETRY_DOCUMENT_PROCESSING', 'DOCUMENT'),
+  async (req, res) => {
+    try {
+      const document = await Document.findById(req.params.id);
+      if (!document) return res.status(404).json({ error: 'Document not found' });
+      if (document.status !== 'failed') {
+        return res.status(400).json({ error: 'Only failed documents can be retried' });
+      }
+
+      document.status = 'queued';
+      addTimelineEvent(document, 'queued', 'Retry requested by user');
+      await document.save();
+      processDocumentInBackground(document._id).catch((error) => {
+        console.error('Retry processing failure:', error.message);
+      });
+
+      res.json({ success: true, message: 'Retry started' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
 router.get('/:id', protect, async (req, res) => {
   try {
     const document = await Document.findById(req.params.id)
@@ -144,7 +234,6 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
-// Get all documents for a case
 router.get('/case/:caseId', protect, async (req, res) => {
   try {
     const documents = await Document.find({ caseId: req.params.caseId })
@@ -157,61 +246,53 @@ router.get('/case/:caseId', protect, async (req, res) => {
   }
 });
 
-// Delete a document - IMPROVED VERSION
-router.delete('/:id', protect, async (req, res) => {
-  try {
-    console.log('Delete request for document ID:', req.params.id);
-    
-    const document = await Document.findById(req.params.id);
-    
-    if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    
-    console.log('Found document:', document.originalName);
-    
-    // Delete physical file (with error handling)
+router.delete(
+  '/:id',
+  protect,
+  authorize('judge', 'clerk'),
+  auditTrail('DELETE_DOCUMENT', 'DOCUMENT'),
+  async (req, res) => {
     try {
-      if (document.filepath && fs.existsSync(document.filepath)) {
-        fs.unlinkSync(document.filepath);
-        console.log('✓ Deleted physical file');
-      } else {
-        console.log('⚠ Physical file not found (may have been deleted already)');
+      const document = await Document.findById(req.params.id);
+      if (!document) {
+        return res.status(404).json({ error: 'Document not found' });
       }
-    } catch (fileError) {
-      console.error('Error deleting physical file:', fileError.message);
-      // Continue even if file deletion fails
-    }
-    
-    // Remove document reference from case
-    try {
+
+      try {
+        if (document.filepath && fs.existsSync(document.filepath)) {
+          fs.unlinkSync(document.filepath);
+        }
+      } catch (fileError) {
+        console.error('Error deleting physical file:', fileError.message);
+      }
+
       if (document.caseId) {
         await Case.findByIdAndUpdate(document.caseId, {
-          $pull: { documents: document._id }
+          $pull: { documents: document._id },
+          $push: {
+            timelineEvents: {
+              eventType: 'DOCUMENT_DELETED',
+              notes: `Document ${document.originalName} deleted`,
+              createdBy: req.user._id
+            }
+          }
         });
-        console.log('✓ Removed document from case');
       }
-    } catch (caseError) {
-      console.error('Error updating case:', caseError.message);
-      // Continue even if case update fails
+
+      await Document.findByIdAndDelete(req.params.id);
+
+      res.json({
+        success: true,
+        message: 'Document deleted successfully'
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to delete document',
+        details: error.message
+      });
     }
-    
-    // Delete document record from database
-    await Document.findByIdAndDelete(req.params.id);
-    console.log('✓ Deleted document record from database');
-    
-    res.json({ 
-      success: true,
-      message: 'Document deleted successfully'
-    });
-    
-  } catch (error) {
-    console.error('❌ Error in delete route:', error);
-    res.status(500).json({ 
-      error: 'Failed to delete document',
-      details: error.message 
-    });
   }
-});
+);
 
 export default router;
+
