@@ -13,6 +13,10 @@ import similarCasesRoutes from './routes/similarCases.js';
 import aiAnalysisRoutes from './routes/aiAnalysis.js';
 import schedulingRoutes from './routes/scheduling.js';
 import geminiRoutes from './routes/gemini.js';
+import opsRoutes from './routes/ops.js';
+import mongoose from 'mongoose';
+import fs from 'fs';
+import { createRateLimiter } from './middleware/rateLimit.js';
 
 const app = express();
 
@@ -33,6 +37,10 @@ app.use(cors({
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(createRateLimiter({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || `${15 * 60 * 1000}`, 10),
+  max: parseInt(process.env.RATE_LIMIT_MAX || '300', 10)
+}));
 app.use('/uploads', express.static('uploads'));
 
 // Routes
@@ -43,10 +51,28 @@ app.use('/api/cases', similarCasesRoutes);
 app.use('/api/scheduling', schedulingRoutes);
 app.use('/api/ai', aiAnalysisRoutes);
 app.use('/api/ai', geminiRoutes);
+app.use('/api/ops', opsRoutes);
 
 // Health check (main route)
 app.get('/', (req, res) => {
   res.json({ message: 'Backend running successfully 🚀' });
+});
+
+app.get('/health/dependencies', createRateLimiter({ windowMs: 60 * 1000, max: 30 }), async (req, res) => {
+  const mongoState = mongoose.connection.readyState;
+  const mongoConnected = mongoState === 1;
+  const uploadDirExists = fs.existsSync('uploads');
+  const geminiConfigured = Boolean(process.env.GEMINI_API_KEY);
+
+  const status = mongoConnected && uploadDirExists ? 200 : 503;
+  res.status(status).json({
+    status: status === 200 ? 'ok' : 'degraded',
+    dependencies: {
+      mongodb: mongoConnected ? 'connected' : 'disconnected',
+      geminiApiKey: geminiConfigured ? 'configured' : 'missing',
+      uploadStorage: uploadDirExists ? 'available' : 'missing'
+    }
+  });
 });
 
 // Error handling middleware

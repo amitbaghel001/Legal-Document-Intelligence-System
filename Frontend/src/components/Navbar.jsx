@@ -12,13 +12,23 @@ import {
 import { AuthContext } from '../context/AuthContext';
 
 const Navbar = () => {
-  const { user, logout } = useContext(AuthContext);
+  const { user, logout, logoutAll } = useContext(AuthContext);
   const navigate = useNavigate();
   const [anchorEl, setAnchorEl] = React.useState(null);
 
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const handleLogoutAll = async () => {
+    try {
+      await logoutAll();
+      navigate('/login');
+    } catch (error) {
+      logout();
+      navigate('/login');
+    }
   };
 
   const handleMenuOpen = (event) => {
@@ -153,6 +163,15 @@ const Navbar = () => {
                 }}
               >
                 Logout
+              </Button>
+              <Button
+                color="inherit"
+                onClick={handleLogoutAll}
+                variant="text"
+                size="small"
+                sx={{ ml: 1 }}
+              >
+                Logout All
               </Button>
             </Box>
           </Box>

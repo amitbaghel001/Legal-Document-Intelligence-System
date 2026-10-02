@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { encryptText, decryptText } from '../utils/cryptoFields.js';
 
 const caseSchema = new mongoose.Schema({
   caseNumber: {
@@ -10,7 +11,11 @@ const caseSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  description: String,
+  description: {
+    type: String,
+    set: encryptText,
+    get: decryptText
+  },
   status: {
     type: String,
     enum: ['pending', 'processing', 'completed', 'closed', 'scheduled'],
@@ -25,10 +30,22 @@ const caseSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Document'
   }],
-  summary: String,
+  summary: {
+    type: String,
+    set: encryptText,
+    get: decryptText
+  },
   ipcTags: [String],
   entities: [String],
   embedding: [Number],
+  aiConfidence: {
+    type: Number,
+    default: null
+  },
+  humanReviewRequired: {
+    type: Boolean,
+    default: false
+  },
   priority: {
     type: String,
     enum: ['low', 'medium', 'high', 'urgent']
@@ -46,6 +63,18 @@ const caseSchema = new mongoose.Schema({
     notes: String,
     duration: Number
   }],
+  timelineEvents: [{
+    eventType: String,
+    notes: String,
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   createdAt: {
     type: Date,
     default: Date.now
@@ -55,5 +84,8 @@ const caseSchema = new mongoose.Schema({
     default: Date.now
   }
 });
+
+caseSchema.set('toJSON', { getters: true });
+caseSchema.set('toObject', { getters: true });
 
 export default mongoose.model('Case', caseSchema);

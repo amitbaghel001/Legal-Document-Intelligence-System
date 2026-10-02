@@ -243,6 +243,19 @@ const CaseDetails = () => {
               <Chip label={case_.status} color={case_.status === 'completed' ? 'success' : 'default'} />
             </Box>
 
+            {typeof case_.aiConfidence === 'number' && (
+              <Box mb={2}>
+                <Typography variant="subtitle2" color="textSecondary">AI Confidence</Typography>
+                <Chip label={`${Math.round(case_.aiConfidence * 100)}%`} color={case_.aiConfidence >= 0.75 ? 'success' : 'warning'} />
+              </Box>
+            )}
+
+            {case_.humanReviewRequired && (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                AI flagged this case for mandatory human review before relying on generated insights.
+              </Alert>
+            )}
+
             {case_.priority && (
               <Box mb={2}>
                 <Typography variant="subtitle2" color="textSecondary">Priority</Typography>

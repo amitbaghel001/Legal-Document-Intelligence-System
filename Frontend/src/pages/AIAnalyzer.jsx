@@ -18,6 +18,7 @@ function AIAnalyzer() {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState(0);
   const [isFileLoading, setIsFileLoading] = useState(false);
+  const [disclaimer, setDisclaimer] = useState('');
 
   // Save-to-case state
   const [cases, setCases] = useState([]);
@@ -97,6 +98,7 @@ function AIAnalyzer() {
       // All Gemini calls now go through the secure backend proxy
       const response = await API.post('/ai/gemini-analyze', { text: documentText });
       const result = response.data;
+      setDisclaimer(result.disclaimer || 'AI output is assistive. Verify before legal use.');
       const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!responseText) throw new Error('Empty response from AI service');
       const analysis = JSON.parse(responseText);
@@ -155,6 +157,9 @@ function AIAnalyzer() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Upload a PDF/TXT file or paste legal document text below
           </Typography>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {disclaimer || 'AI suggestions are not final legal advice. Manual legal review is mandatory.'}
+          </Alert>
 
           <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
             <Button

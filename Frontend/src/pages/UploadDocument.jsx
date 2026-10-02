@@ -11,6 +11,8 @@ const UploadDocument = () => {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [documentId, setDocumentId] = useState('');
+  const [processingStatus, setProcessingStatus] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const navigate = useNavigate();
@@ -37,25 +39,54 @@ const UploadDocument = () => {
       const { data } = await API.post('/documents/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
+      setDocumentId(data._id);
 
       setSuccess('Document uploaded successfully!');
       setUploading(false);
 
-      // Process document with ML
+      // Queue document processing
       setProcessing(true);
+      setProcessingStatus('queued');
       await API.post(`/documents/process/${data._id}`);
-      setProcessing(false);
-
-      setSuccess('Document processed successfully!');
-      setTimeout(() => {
-        navigate(`/case/${caseId}`);
-      }, 1500);
     } catch (err) {
       setError(err.response?.data?.error || 'Upload failed');
       setUploading(false);
       setProcessing(false);
     }
   };
+
+  const checkProcessingStatus = async () => {
+    if (!documentId || !processing) return;
+    try {
+      const { data } = await API.get(`/documents/${documentId}`);
+      setProcessingStatus(data.status);
+      if (data.status === 'completed') {
+        setProcessing(false);
+        setSuccess('Document processed successfully!');
+        setTimeout(() => navigate(`/case/${caseId}`), 1200);
+      } else if (data.status === 'failed') {
+        setProcessing(false);
+        setError('Processing failed. Please retry.');
+      }
+    } catch (err) {
+      setProcessing(false);
+      setError('Unable to fetch processing status');
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!documentId) return;
+    setError('');
+    setProcessing(true);
+    setProcessingStatus('queued');
+    await API.post(`/documents/retry/${documentId}`);
+  };
+
+  React.useEffect(() => {
+    if (!processing || !documentId) return;
+    const timer = setInterval(checkProcessingStatus, 3000);
+    return () => clearInterval(timer);
+  }, [processing, documentId]);
 
   return (
     <Container maxWidth="sm" sx={{ mt: 4 }}>
@@ -97,7 +128,7 @@ const UploadDocument = () => {
             <LinearProgress />
             <Typography variant="body2" align="center" sx={{ mt: 1 }}>
               {uploading && 'Uploading...'}
-              {processing && 'Processing with AI...'}
+              {processing && `Processing with AI... (${processingStatus || 'starting'})`}
             </Typography>
           </Box>
         )}
@@ -120,6 +151,17 @@ const UploadDocument = () => {
             Cancel
           </Button>
         </Box>
+        {!processing && documentId && error && (
+          <Button
+            variant="contained"
+            color="warning"
+            fullWidth
+            sx={{ mt: 2 }}
+            onClick={handleRetry}
+          >
+            Retry Processing
+          </Button>
+        )}
       </Paper>
     </Container>
   );

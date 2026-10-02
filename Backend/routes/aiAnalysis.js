@@ -1,10 +1,15 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Case from '../models/Case.js';
 import Document from '../models/Document.js';
 import { protect } from '../middleware/auth.js';
+import { authorize } from '../middleware/roles.js';
 import { postGeminiWithRetry } from '../utils/geminiRetry.js';
+import { auditTrail } from '../middleware/auditTrail.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 
 const router = express.Router();
+router.use(createRateLimiter({ windowMs: 5 * 60 * 1000, max: 60 }));
 
 // gemini-2.5-flash's free tier caps out at ~20 requests/day per project;
 // flash-lite has its own separate, much higher daily quota.
@@ -34,8 +39,11 @@ const analysisSchema = {
 // Analyze case document with Gemini: identifies real applicable statute
 // sections and entities directly from the case text, rather than matching
 // against a small hardcoded keyword list.
-router.post('/analyze/:caseId', protect, async (req, res) => {
+router.post('/analyze/:caseId', protect, authorize('judge', 'lawyer', 'clerk'), auditTrail('AI_ANALYZE_CASE', 'CASE', (req) => req.params.caseId), async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.caseId)) {
+      return res.status(400).json({ error: 'Invalid case ID' });
+    }
     const case_ = await Case.findById(req.params.caseId).populate('documents');
 
     if (!case_) {
@@ -88,12 +96,28 @@ router.post('/analyze/:caseId', protect, async (req, res) => {
     case_.entities = analysis.entities || [];
     case_.summary = analysis.summary || case_.summary;
     case_.status = 'completed';
+    const sectionCount = (analysis.ipcSections || []).length;
+    const entityCount = (analysis.entities || []).length;
+    const confidence = Math.min(0.98, 0.45 + (sectionCount * 0.1) + (entityCount * 0.05));
+    case_.aiConfidence = Math.round(confidence * 100) / 100;
+    case_.humanReviewRequired = confidence < 0.75;
+
+    if (!case_.timelineEvents) case_.timelineEvents = [];
+    case_.timelineEvents.push({
+      eventType: 'AI_ANALYSIS',
+      notes: `AI completed with confidence ${(case_.aiConfidence * 100).toFixed(0)}%`,
+      createdBy: req.user._id
+    });
     await case_.save();
 
     res.json({
       success: true,
       analysis,
-      case: case_
+      case: case_,
+      explainability: {
+        reason: 'Confidence is derived from extracted legal sections and named entities richness.',
+        humanReviewRequired: case_.humanReviewRequired
+      }
     });
   } catch (error) {
     const upstreamMessage = error.response?.data?.error?.message || error.message;

@@ -1,9 +1,14 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Case from '../models/Case.js';
 import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
+import { authorize } from '../middleware/roles.js';
+import { auditTrail } from '../middleware/auditTrail.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 
 const router = express.Router();
+router.use(createRateLimiter({ windowMs: 5 * 60 * 1000, max: 120 }));
 
 // AI-powered case prioritization algorithm
 //
@@ -37,7 +42,7 @@ function calculateCasePriority(case_) {
 }
 
 // Generate AI-suggested schedule
-router.get('/auto-schedule', protect, async (req, res) => {
+router.get('/auto-schedule', protect, authorize('judge', 'clerk'), auditTrail('GENERATE_AUTO_SCHEDULE', 'CASE'), async (req, res) => {
   try {
     const { startDate, days = 7 } = req.query;
     
@@ -128,7 +133,7 @@ router.get('/auto-schedule', protect, async (req, res) => {
 });
 
 // Apply schedule to cases
-router.post('/apply-schedule', protect, async (req, res) => {
+router.post('/apply-schedule', protect, authorize('judge', 'clerk'), auditTrail('APPLY_SCHEDULE', 'CASE'), async (req, res) => {
   try {
     const { schedule } = req.body;
     
@@ -138,6 +143,9 @@ router.post('/apply-schedule', protect, async (req, res) => {
     
     const updates = [];
     for (const item of schedule) {
+      if (!mongoose.Types.ObjectId.isValid(item.caseId)) {
+        continue;
+      }
       const updated = await Case.findByIdAndUpdate(
         item.caseId,
         {
@@ -169,7 +177,7 @@ router.post('/apply-schedule', protect, async (req, res) => {
 });
 
 // Get judge's schedule (calendar view)
-router.get('/my-schedule', protect, async (req, res) => {
+router.get('/my-schedule', protect, authorize('judge', 'clerk'), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     
@@ -208,8 +216,11 @@ router.get('/my-schedule', protect, async (req, res) => {
 });
 
 // Reschedule a case
-router.put('/reschedule/:caseId', protect, async (req, res) => {
+router.put('/reschedule/:caseId', protect, authorize('judge', 'clerk'), auditTrail('RESCHEDULE_CASE', 'CASE', (req) => req.params.caseId), async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.caseId)) {
+      return res.status(400).json({ error: 'Invalid case ID' });
+    }
     const { scheduledDate, scheduledTime, courtRoom, reason } = req.body;
     
     const case_ = await Case.findById(req.params.caseId);
