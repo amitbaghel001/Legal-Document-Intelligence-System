@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 
 const EICAR_SIGNATURE = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
 const DANGEROUS_MAGIC_BYTES = [
@@ -7,11 +8,17 @@ const DANGEROUS_MAGIC_BYTES = [
 ];
 
 export function scanUploadedFile(filepath) {
-  if (!filepath || !fs.existsSync(filepath)) {
+  const uploadsRoot = path.resolve(process.cwd(), 'uploads') + path.sep;
+  const resolvedPath = filepath ? path.resolve(filepath) : '';
+  if (!resolvedPath.startsWith(uploadsRoot)) {
+    return { safe: false, reason: 'Invalid upload path' };
+  }
+
+  if (!filepath || !fs.existsSync(resolvedPath)) {
     return { safe: false, reason: 'Uploaded file missing on server' };
   }
 
-  const fileBuffer = fs.readFileSync(filepath);
+  const fileBuffer = fs.readFileSync(resolvedPath);
   const firstBytes = fileBuffer.subarray(0, 8);
   const preview = fileBuffer.subarray(0, 4096).toString('utf8');
 
@@ -28,4 +35,3 @@ export function scanUploadedFile(filepath) {
 
   return { safe: true };
 }
-

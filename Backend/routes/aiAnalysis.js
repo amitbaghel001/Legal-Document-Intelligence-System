@@ -1,12 +1,15 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Case from '../models/Case.js';
 import Document from '../models/Document.js';
 import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/roles.js';
 import { postGeminiWithRetry } from '../utils/geminiRetry.js';
 import { auditTrail } from '../middleware/auditTrail.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 
 const router = express.Router();
+router.use(createRateLimiter({ windowMs: 5 * 60 * 1000, max: 60 }));
 
 // gemini-2.5-flash's free tier caps out at ~20 requests/day per project;
 // flash-lite has its own separate, much higher daily quota.
@@ -38,6 +41,9 @@ const analysisSchema = {
 // against a small hardcoded keyword list.
 router.post('/analyze/:caseId', protect, authorize('judge', 'lawyer', 'clerk'), auditTrail('AI_ANALYZE_CASE', 'CASE', (req) => req.params.caseId), async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.caseId)) {
+      return res.status(400).json({ error: 'Invalid case ID' });
+    }
     const case_ = await Case.findById(req.params.caseId).populate('documents');
 
     if (!case_) {

@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Case from '../models/Case.js';
 import User from '../models/User.js';
 import '../models/Document.js';
@@ -6,9 +7,12 @@ import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/roles.js';
 import { validateCasePayload, validateCaseUpdatePayload } from '../middleware/validators.js';
 import { auditTrail } from '../middleware/auditTrail.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 import { getEmbedding, caseEmbeddingText } from '../utils/embeddings.js';
 
 const router = express.Router();
+router.use(createRateLimiter({ windowMs: 5 * 60 * 1000, max: 200 }));
+const CASE_NUMBER_REGEX = /^[A-Za-z0-9/_-]{3,40}$/;
 
 // Create case
 router.post(
@@ -20,6 +24,9 @@ router.post(
   async (req, res) => {
     try {
       const { caseNumber, title, description } = req.body;
+      if (!CASE_NUMBER_REGEX.test(caseNumber)) {
+        return res.status(400).json({ error: 'Invalid case number format' });
+      }
 
       const caseExists = await Case.findOne({ caseNumber });
       if (caseExists) {
@@ -56,9 +63,23 @@ router.get('/all', protect, async (req, res) => {
 
     const query = {};
     if (req.query.status) query.status = req.query.status;
+    if (req.query.status && !['pending', 'processing', 'completed', 'closed', 'scheduled'].includes(req.query.status)) {
+      return res.status(400).json({ error: 'Invalid status filter' });
+    }
     if (req.query.courtRoom) query.courtRoom = req.query.courtRoom;
-    if (req.query.section) query.ipcTags = { $in: [req.query.section] };
-    if (req.query.assignedJudge) query.assignedJudge = req.query.assignedJudge;
+    if (req.query.section) {
+      const section = String(req.query.section).trim();
+      if (!/^[A-Za-z0-9\s.-]{1,40}$/.test(section)) {
+        return res.status(400).json({ error: 'Invalid section filter' });
+      }
+      query.ipcTags = { $in: [section] };
+    }
+    if (req.query.assignedJudge) {
+      if (!mongoose.Types.ObjectId.isValid(req.query.assignedJudge)) {
+        return res.status(400).json({ error: 'Invalid assignedJudge filter' });
+      }
+      query.assignedJudge = req.query.assignedJudge;
+    }
     if (req.query.startDate || req.query.endDate) {
       query.createdAt = {};
       if (req.query.startDate) query.createdAt.$gte = new Date(req.query.startDate);
@@ -86,6 +107,9 @@ router.get('/all', protect, async (req, res) => {
 // Get single case
 router.get('/:id', protect, async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid case ID' });
+    }
     const case_ = await Case.findById(req.params.id)
       .populate('createdBy', 'name email role')
       .populate('documents')
@@ -111,6 +135,9 @@ router.put(
   auditTrail('UPDATE_CASE', 'CASE'),
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid case ID' });
+      }
       const { title, description, status, summary, ipcTags, entities, humanReviewRequired } = req.body;
       const case_ = await Case.findById(req.params.id);
       if (!case_) {
@@ -156,6 +183,9 @@ router.post(
   auditTrail('ADD_TIMELINE_EVENT', 'CASE'),
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid case ID' });
+      }
       const { eventType, notes } = req.body;
       if (!eventType || !notes) {
         return res.status(400).json({ error: 'eventType and notes are required' });
@@ -184,8 +214,14 @@ router.post(
   auditTrail('ASSIGN_CASE', 'CASE'),
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid case ID' });
+      }
       const { userId } = req.body;
       if (!userId) return res.status(400).json({ error: 'userId is required' });
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ error: 'Invalid userId' });
+      }
 
       const assignee = await User.findById(userId);
       if (!assignee || !['judge', 'lawyer', 'clerk'].includes(assignee.role)) {
@@ -219,6 +255,9 @@ router.delete(
   auditTrail('DELETE_CASE', 'CASE'),
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid case ID' });
+      }
       const case_ = await Case.findByIdAndDelete(req.params.id);
 
       if (!case_) {
@@ -233,4 +272,3 @@ router.delete(
 );
 
 export default router;
-

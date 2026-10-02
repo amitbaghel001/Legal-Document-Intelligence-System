@@ -8,6 +8,7 @@ import { auditTrail } from '../middleware/auditTrail.js';
 
 const router = express.Router();
 const authLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 35 });
+router.use(authLimiter);
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -35,7 +36,7 @@ const buildAuthResponse = (user) => ({
 });
 
 // Register
-router.post('/register', authLimiter, validateRegisterPayload, auditTrail('REGISTER', 'USER'), async (req, res) => {
+router.post('/register', validateRegisterPayload, auditTrail('REGISTER', 'USER'), async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
 
@@ -55,7 +56,7 @@ router.post('/register', authLimiter, validateRegisterPayload, auditTrail('REGIS
 });
 
 // Login
-router.post('/login', authLimiter, validateAuthPayload, auditTrail('LOGIN', 'USER'), async (req, res) => {
+router.post('/login', validateAuthPayload, auditTrail('LOGIN', 'USER'), async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -78,7 +79,7 @@ router.post('/login', authLimiter, validateAuthPayload, auditTrail('LOGIN', 'USE
 });
 
 // Refresh access token
-router.post('/refresh', authLimiter, async (req, res) => {
+router.post('/refresh', async (req, res) => {
   try {
     const refreshToken = req.body?.refreshToken || req.headers['x-refresh-token'];
     if (!refreshToken) {

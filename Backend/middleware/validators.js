@@ -1,12 +1,19 @@
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function isValidEmail(value) {
+  if (!isNonEmptyString(value)) return false;
+  const candidate = value.trim();
+  const atPos = candidate.indexOf('@');
+  if (atPos <= 0 || atPos !== candidate.lastIndexOf('@')) return false;
+  const domain = candidate.slice(atPos + 1);
+  return domain.includes('.') && !domain.startsWith('.') && !domain.endsWith('.');
+}
+
 export function validateAuthPayload(req, res, next) {
   const { email, password } = req.body;
-  if (!isNonEmptyString(email) || !EMAIL_REGEX.test(email.trim())) {
+  if (!isValidEmail(email)) {
     return res.status(400).json({ error: 'Valid email is required' });
   }
   if (!isNonEmptyString(password) || password.length < 8) {
@@ -52,4 +59,3 @@ export function validateCaseUpdatePayload(req, res, next) {
   }
   next();
 }
-

@@ -9,9 +9,12 @@ import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/roles.js';
 import { scanUploadedFile } from '../middleware/fileSecurity.js';
 import { auditTrail } from '../middleware/auditTrail.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
+import mongoose from 'mongoose';
 
 const router = express.Router();
 const MAX_PROCESS_ATTEMPTS = 3;
+router.use(createRateLimiter({ windowMs: 5 * 60 * 1000, max: 150 }));
 
 function addTimelineEvent(document, state, message) {
   if (!document.processingTimeline) document.processingTimeline = [];
@@ -19,6 +22,7 @@ function addTimelineEvent(document, state, message) {
 }
 
 async function processDocumentInBackground(documentId, attempt = 1) {
+  if (!mongoose.Types.ObjectId.isValid(documentId)) return;
   const document = await Document.findById(documentId);
   if (!document) return;
 
@@ -120,9 +124,14 @@ router.post(
         return res.status(400).json({ error: 'No file uploaded' });
       }
 
-      const scanResult = scanUploadedFile(req.file.path);
+      const safePath = ensureSafeUploadPath(req.file.path);
+      if (!safePath) {
+        return res.status(400).json({ error: 'Unsafe upload path rejected' });
+      }
+
+      const scanResult = scanUploadedFile(safePath);
       if (!scanResult.safe) {
-        fs.unlinkSync(req.file.path);
+        fs.unlinkSync(safePath);
         return res.status(400).json({ error: scanResult.reason });
       }
 
@@ -135,7 +144,7 @@ router.post(
       const document = await Document.create({
         filename: req.file.filename,
         originalName: req.file.originalname,
-        filepath: req.file.path,
+        filepath: safePath,
         filesize: req.file.size,
         mimetype: req.file.mimetype,
         caseId,
@@ -167,6 +176,9 @@ router.post(
   auditTrail('PROCESS_DOCUMENT', 'DOCUMENT'),
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid document ID' });
+      }
       const document = await Document.findById(req.params.id);
       if (!document) {
         return res.status(404).json({ error: 'Document not found' });
@@ -198,6 +210,9 @@ router.post(
   auditTrail('RETRY_DOCUMENT_PROCESSING', 'DOCUMENT'),
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid document ID' });
+      }
       const document = await Document.findById(req.params.id);
       if (!document) return res.status(404).json({ error: 'Document not found' });
       if (document.status !== 'failed') {
@@ -220,6 +235,9 @@ router.post(
 
 router.get('/:id', protect, async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid document ID' });
+    }
     const document = await Document.findById(req.params.id)
       .populate('uploadedBy', 'name email')
       .populate('caseId', 'caseNumber title');
@@ -236,6 +254,9 @@ router.get('/:id', protect, async (req, res) => {
 
 router.get('/case/:caseId', protect, async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.caseId)) {
+      return res.status(400).json({ error: 'Invalid case ID' });
+    }
     const documents = await Document.find({ caseId: req.params.caseId })
       .populate('uploadedBy', 'name email')
       .sort({ uploadedAt: -1 });
@@ -253,14 +274,18 @@ router.delete(
   auditTrail('DELETE_DOCUMENT', 'DOCUMENT'),
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid document ID' });
+      }
       const document = await Document.findById(req.params.id);
       if (!document) {
         return res.status(404).json({ error: 'Document not found' });
       }
 
       try {
-        if (document.filepath && fs.existsSync(document.filepath)) {
-          fs.unlinkSync(document.filepath);
+        const safePath = ensureSafeUploadPath(document.filepath);
+        if (safePath && fs.existsSync(safePath)) {
+          fs.unlinkSync(safePath);
         }
       } catch (fileError) {
         console.error('Error deleting physical file:', fileError.message);
@@ -296,3 +321,8 @@ router.delete(
 
 export default router;
 
+function ensureSafeUploadPath(filepath) {
+  const resolvedPath = path.resolve(filepath || '');
+  const uploadRoot = path.resolve(process.cwd(), 'uploads') + path.sep;
+  return resolvedPath.startsWith(uploadRoot) ? resolvedPath : null;
+}

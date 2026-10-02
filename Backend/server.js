@@ -58,7 +58,7 @@ app.get('/', (req, res) => {
   res.json({ message: 'Backend running successfully 🚀' });
 });
 
-app.get('/health/dependencies', async (req, res) => {
+app.get('/health/dependencies', createRateLimiter({ windowMs: 60 * 1000, max: 30 }), async (req, res) => {
   const mongoState = mongoose.connection.readyState;
   const mongoConnected = mongoState === 1;
   const uploadDirExists = fs.existsSync('uploads');
